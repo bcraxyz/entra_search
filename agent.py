@@ -7,7 +7,7 @@ project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
 location = os.getenv("ENGINE_LOCATION")
 engine_id = os.getenv("ENGINE_ID")
 
-def search_user_directory(search_query: str) -> str:
+def search_user_directory(query: str) -> str:
     """
     Searches the internal employee directory (synced from Entra ID) for users and groups.
     """
@@ -17,43 +17,26 @@ def search_user_directory(search_query: str) -> str:
             if location != "global"
             else None
         )
-        client = discoveryengine.SearchServiceClient(client_options=client_options)
+        client = discoveryengine.AssistantServiceClient(client_options=client_options)
 
-        serving_config = (
-            f"projects/{project_id}/locations/{location}/collections/"
-            f"default_collection/engines/{engine_id}/servingConfigs/default_search"
+        request = discoveryengine.StreamAssistRequest(
+            name=client.assistant_path(
+                project=project_id,
+                location=location,
+                collection="default_collection",
+                engine=engine_id,
+                assistant="default_assistant",
+            ),
+            query=discoveryengine.Query(text=query)
         )
 
-        request = discoveryengine.SearchRequest(
-            serving_config=serving_config,
-            query=search_query,
-            page_size=3,
-        )
-
-        response = client.search(request)
-
-        results = list(response.results)
-        if len(results) == 0:
-            return f"No directory results for '{search_query}'."
+        stream = client.stream_assist(request=request)
 
         output = []
-        for i, result in enumerate(results):
-            data = result.document.struct_data
-            
-            name = document_data.get("displayName", "Unknown")
-            title = document_data.get("jobTitle", "Unknown")
-            email = document_data.get("mail", "Unknown")
-            dept = document_data.get("department", "Unknown")
-            
-            output.append(
-                f"Result {i+1}:\n"
-                f"Name: {name}\n"
-                f"Title: {title}\n"
-                f"Email: {email}\n"
-                f"Department: {dept}"
-            )
-
-        return "\n\n".join(output)
+        for response in stream:
+            output.append(str(response))
+        
+        return "\n".join(output)
 
     except Exception as e:
         return f"Search failed: {str(e)}"
