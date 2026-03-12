@@ -1,9 +1,11 @@
 import os
 from google.adk.agents.llm_agent import Agent
+from google.api_core.client_options import ClientOptions
+from google.cloud import discoveryengine_v1 as discoveryengine
 
 project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-location = os.getenv("GOOGLE_CLOUD_LOCATION")
-datastore_id = os.getenv("GOOGLE_CLOUD_LOCATION")
+location = os.getenv("ENGINE_LOCATION")
+engine_id = os.getenv("ENGINE_ID")
 
 def search_user_directory(search_query: str) -> str:
     """
@@ -11,56 +13,54 @@ def search_user_directory(search_query: str) -> str:
     """
     try:
         client_options = (
-            ClientOptions(api_endpoint=f"{LOCATION}-discoveryengine.googleapis.com")
-            if LOCATION != "global"
+            ClientOptions(api_endpoint=f"{location}-discoveryengine.googleapis.com")
+            if location != "global"
             else None
         )
         client = discoveryengine.SearchServiceClient(client_options=client_options)
 
-        serving_config = client.serving_config_path(
-            project=project_id,
-            location=location,
-            data_store=datastore_id,
-            serving_config="default_config",
+        serving_config = (
+            f"projects/{project_id}/locations/{location}/collections/"
+            f"default_collection/engines/{engine_id}/servingConfigs/default_search"
         )
 
         request = discoveryengine.SearchRequest(
             serving_config=serving_config,
             query=search_query,
-            page_size=3, # Limit results to keep context window manageable
-            content_search_spec=discoveryengine.SearchRequest.ContentSearchSpec(
-                extractive_content_spec=discoveryengine.SearchRequest.ContentSearchSpec.ExtractiveContentSpec(
-                    max_extractive_answer_count=1
-                )
-            ),
+            page_size=3,
         )
 
         response = client.search(request)
 
-        if not response.results:
-            return f"Could nt find any information matching '{search_query}' in the directory."
+        results = list(response.results)
+        if len(results) == 0:
+            return f"No directory results for '{search_query}'."
 
-        result_strings = []
-        for i, result in enumerate(response.results):
-            document_data = result.document.struct_data
+        output = []
+        for i, result in enumerate(results):
+            data = result.document.struct_data
             
-            snippets = []
-            if result.document.derived_struct_data:
-                for segment in result.document.derived_struct_data.get("extractive_segments", []):
-                    snippets.append(segment.get("content", ""))
+            name = document_data.get("displayName", "Unknown")
+            title = document_data.get("jobTitle", "Unknown")
+            email = document_data.get("mail", "Unknown")
+            dept = document_data.get("department", "Unknown")
             
-            snippet_text = " ".join(snippets).strip()
-            
-            result_strings.append(f"Result {i+1}: Data: {document_data} | Snippet: {snippet_text}")
+            output.append(
+                f"Result {i+1}:\n"
+                f"Name: {name}\n"
+                f"Title: {title}\n"
+                f"Email: {email}\n"
+                f"Department: {dept}"
+            )
 
-        return "\n\n".join(result_strings)
+        return "\n\n".join(output)
 
     except Exception as e:
-        return f"An error occurred while querying the knowledge base: {str(e)}"
+        return f"Search failed: {str(e)}"
 
 root_agent = Agent(
     name='entra_search',
-    model='gemini-3.1-flash-preview',
-    instruction='Answer user questions to the best of your knowledge',
+    model='gemini-2.5-flash',
+    instruction='Answer user questions using the user directory.',
     tools=[search_user_directory],
 )
